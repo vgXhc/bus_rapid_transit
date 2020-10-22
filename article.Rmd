@@ -1,0 +1,77 @@
+---
+title: "BRT analyses"
+author: "Harald Kliems"
+date: "10/21/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+A dude on the internet claimed that the Madison BRT project would "not cater to the bottom 2 deciles of income and those are the groups who typically don't have the option of driving." 
+
+# Get data
+## BRT route and stations
+Data are available on the City of Madison Open Data portal.
+- [stations](https://opendata.arcgis.com/datasets/42118889b9af42358071b0485c53bee6_27.zip)
+- [routes](https://opendata.arcgis.com/datasets/42118889b9af42358071b0485c53bee6_27.zip)
+
+For purposes of this analysis, it makes sense to focus on the stations -- a bus that passes by your residence but doesn't stop anywhere nearby doesn't do you any good.
+
+```{r}
+library(tidyverse)
+library(sf)
+library(tidycensus)
+```
+The dataset contains all stations, including those for planned future lines. I will filter to the ones in the current proposal, the "locally preferred alternative."
+```{r}
+stations <- read_sf("data/Bus_Rapid_Transit_Stations.shp") %>% 
+  filter(LPA == 1)
+```
+
+## Population and income data
+The American Community Survey has data on income at the block group level. This is a fairly large area for this type of analyses and data at the block level would be preferable. However, only the decennial census provides that level of detail -- which at this point is too old to be useful.
+
+```{r}
+vars2018 <- load_variables(2018, "acs5", cache = T)
+dp_vars <- load_variables(2018, "acs5/profile", cache = T)
+```
+Table `B19001` has household income data, providing the number of households in different income brackets. First, we get data for all block groups in Dane County.
+
+```{r}
+income <- get_acs("block group", table = "B19001", state = 55, county = "Dane", geometry = T)
+```
+The median household income for the whole City of Madison is available in the data profile tables. 
+
+```{r}
+madison <- get_acs("place", table = "DP03", state = 55) %>% 
+  filter(NAME == "Madison city, Wisconsin")
+
+madison %>% filter(variable == "DP03_0062") %>% select(estimate)
+```
+The median household income in Madison is a little under $63,000. I don't think there is a way to get actual income percentiles from the data.
+
+```{r}
+
+```
+
+
+# Buffers around stations
+To create areas served by BRT stops, as a simple model we create buffers around the stops. How far are people willing to walk to a stop? That's a controversial question. I'll start with the common European spacing of 400 meters.
+
+```{r}
+library(units)
+buffers <- stations %>% 
+  st_transform(3857) %>% 
+  st_buffer(set_units(400, metre))
+```
+
+```{r}
+library(tmap)
+
+tmap_mode("view")
+tm_shape(buffers) +
+  tm_polygons()
+```
+
