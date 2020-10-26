@@ -23,6 +23,7 @@ For purposes of this analysis, it makes sense to focus on the stations -- a bus 
 library(tidyverse)
 library(sf)
 library(tidycensus)
+library(tmap)
 ```
 The dataset contains all stations, including those for planned future lines. I will filter to the ones in the current proposal, the "locally preferred alternative."
 ```{r}
@@ -50,10 +51,22 @@ madison <- get_acs("place", table = "DP03", state = 55) %>%
 
 madison %>% filter(variable == "DP03_0062") %>% select(estimate)
 ```
-The median household income in Madison is a little under $63,000. I don't think there is a way to get actual income percentiles from the data.
+The median household income in Madison is a little under $63,000. I don't think there is a way to get actual income percentiles from the data. To make the geographic analysis a little easier, I'm just going to focus on median income by block group for now. A reminder that the margin of error at the block group level is very high. 
 
 ```{r}
+med_inc <- get_acs("block group", 
+                   variable = c("B19013_001", "B19001_001"),#median hh income and total number of households
+                   state = "WI",
+                   county = "Dane",
+                   survey = "acs5",
+                   geometry = T,
+                   keep_geo_vars = T)
 
+```
+A quick map of the median income.
+```{r}
+tm_shape(med_inc) +
+  tm_polygons("estimate", alpha = 0.5)
 ```
 
 
@@ -71,7 +84,35 @@ buffers <- stations %>%
 library(tmap)
 
 tmap_mode("view")
-tm_shape(buffers) +
-  tm_polygons()
+tm_shape(income) +
+  tm_polygons(alpha = .3) +
+  tm_shape(buffers) +
+  tm_polygons(col = "red")
+```
+
+# Block group coverage
+Most polygons around stations cover multiple block groups. To adequately represent the demographics of a station's access shed, we therefore need a measure of coverage of those blocks. Let's look at the following example.
+
+![](img/weighting_by_block_group_1.svg)
+
+The station and its access shed are on the boundary between two block groups. One block group has a median income of \$50,000, the other of \$100,000. With half of the access shed in block A and half in block B, one could assign them a weight of 0.5 each and therefore get a median income of $100000*0.5 + 50000*0.5 = 75000$. One may argue that this is too simplistic: What if there are only 100 households in block group A but 10,000 in B? That in itself is not a big problem: Block groups by design have similar population numbers. But they do vary in area, which could lead to scenarios like this:
+
+![](img/weighting_by_block_group_2.svg)
+Here the two block groups both have 49 households, evenly distributed across the area. But because block group A is 4 times as large, only 1 household from block group A but 3 from block group B would be in the access shed. So we should take the household density of each block group and include it in the calculation:
+
+$\frac{\frac{n_{households_A}}{A_A}*A_{Coverage_A}*Income_A + \frac{n_{households_B}}{A_B}*A_{shedCoverage_B}*Income_B}{\frac{n_{households_A}}{A_A}*A_{Coverage_A}+\frac{n_{households_B}}{A_B}*A_{shedCoverage_B}} $
+
+```{r}
+med_inc %>% 
+  pivot_wider(id_cols = "GEOID", names_from = "variable", values_from = "estimate")
+```
+
+
+The first step is to retrieve the block groups intersecting at all. We'll start with one example polygon.
+
+```{r}
+buffer1 <- buffers[1, ] %>% 
+  st_transform("NAD83")
+
 ```
 
